@@ -14,17 +14,45 @@
 
 #define NO_MATCH -1
 #define MATCH 1
-#define GET 1
-#define HEAD 2
+
 #define VERSION "HTTP/1.1"
 #define MAX_DIRECTORIES 20
 #define ROOT "./"
 
 typedef struct { char *k; int v; } pair_t;
-
+// methods
+#define METHOD_GET 1
+#define METHOD_HEAD 2
+#define METHOD_POST 3
+#define METHOD_PUT 4
+#define METHOD_DELETE 5
+#define METHOD_TRACE 6
+#define METHOD_CONNECT 7
+#define METHOD_OPTIONS 8
 static pair_t methodTable[] = {
-    { "GET", GET }, { "HEAD", HEAD }
+    { "GET", METHOD_GET },
+	{ "HEAD", METHOD_HEAD },
+	{ "POST", METHOD_POST },
+	{ "PUT", METHOD_PUT },
+	{ "DELETE", METHOD_DELETE },
+	{ "TRACE", METHOD_TRACE },
+	{ "CONNECT", METHOD_TRACE },
+	{ "OPTIONS", METHOD_OPTIONS }
 };
+
+// response codes
+#define RESPONSE_OK 200
+#define RESPONSE_MOVED 301
+#define RESPONSE_BAD 400
+#define RESPONSE_NOT_FOUND 404
+#define RESPONSE_NOT_ALLOWED 405
+//static pair_t codeTable[] = {
+//	{ "OK", OK },
+//	{ "Moved Permanently", MOVED },
+//	{ "Bad Request", BAD },
+//	{ "Not Found", NOT_FOUND },
+//	{ "Method Not Allowed", NOT_ALLOWED }
+//};
 
 #define TABELIZE(A) StringEnum(A ## Table, A, sizeof(A ## Table)/sizeof(pair_t))
 
@@ -97,7 +125,7 @@ FileRetrieve(FILE * object, const char * root, const char * path) {
 	return rv;
 }
 
-static void
+static int
 ProcessRequestLine(const char * root, const char * line) {
 	unsigned tokenCount = 0;
 	char ** split = StringSplit(line, " ", &tokenCount);
@@ -111,20 +139,31 @@ ProcessRequestLine(const char * root, const char * line) {
 	int rv = -1;
 	FILE * object = NULL;
 	switch (TABELIZE(method)) {
-	case GET:
+	case METHOD_GET:
 		rv = FileRetrieve(object, root, split[1]);
 		break;
-	case HEAD:
+	case METHOD_HEAD:
 		rv = FileRetrieve(object, root, split[1]);
+		break;
+	case METHOD_POST:
+	case METHOD_PUT:
+	case METHOD_DELETE:
+	case METHOD_TRACE:
+	case METHOD_CONNECT:
+	case METHOD_OPTIONS:
+		rv = RESPONSE_NOT_ALLOWED;
+		printf("not allowed\n");
 		break;
 	case NO_MATCH:
-		printf("no GET/HEAD\n");
+		rv = RESPONSE_BAD;
+		printf("bad request\n");
 		goto clean;
 	}
 	(void)rv;
 	clean:
 		if (tokenCount) free(split[0]);
 		free(split);
+	return rv;
 }
 
 static void
@@ -138,10 +177,9 @@ ProcessRequest(const char * root, const char * request) {
 
 int main() {
 	char * cwd = getcwd(NULL, 0);
-	printf("%s\n", cwd);
 	assert(cwd);
 	char * root = StringBuild(cwd, "/www" );
-	ProcessRequest(root, "GET /images/uchicago/logo.png HTTP/1.1\r\nHost: www.someschool.edu\r\n");
+	ProcessRequest(root, "OPTIONS /images/uchicago/logo.png HTTP/1.1\r\nHost: www.someschool.edu\r\n");
 	free(cwd);
 	free(root);
 	printf("exiting\n");
