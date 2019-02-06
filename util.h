@@ -33,7 +33,7 @@ typedef struct ServerTCPMessage {
 	char * clientService;
 }ServerTCPMessage;
 
-typedef void (*OnReceiveDelegate) (ServerTCPMessage * serverMsg);
+typedef void (*OnReceiveDelegate) (const ServerTCPMessage * serverMsg);
 typedef struct addrinfo addrinfo;
 typedef struct sockaddr_storage sockaddr_storage;
 typedef struct sockaddr sockaddr;
