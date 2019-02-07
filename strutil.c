@@ -11,6 +11,7 @@
 #include <ftw.h>
 #include <unistd.h>
 #include <assert.h>
+#include <stdint.h>
 
 #define NO_MATCH -1
 #define MATCH 1
@@ -19,7 +20,8 @@
 #define MAX_DIRECTORIES 20
 #define ROOT "./"
 
-typedef struct { char *k; int v; } pair_t;
+typedef struct { char *k; int v; } kv_t;
+typedef struct { int v; char *k;  } vk_t;
 // methods
 #define METHOD_GET 1
 #define METHOD_HEAD 2
@@ -29,14 +31,14 @@ typedef struct { char *k; int v; } pair_t;
 #define METHOD_TRACE 6
 #define METHOD_CONNECT 7
 #define METHOD_OPTIONS 8
-static pair_t methodTable[] = {
+static kv_t methodTable[] = {
     { "GET", METHOD_GET },
 	{ "HEAD", METHOD_HEAD },
 	{ "POST", METHOD_POST },
 	{ "PUT", METHOD_PUT },
 	{ "DELETE", METHOD_DELETE },
 	{ "TRACE", METHOD_TRACE },
-	{ "CONNECT", METHOD_TRACE },
+	{ "CONNECT", METHOD_CONNECT },
 	{ "OPTIONS", METHOD_OPTIONS }
 };
 
@@ -46,21 +48,46 @@ static pair_t methodTable[] = {
 #define RESPONSE_BAD 400
 #define RESPONSE_NOT_FOUND 404
 #define RESPONSE_NOT_ALLOWED 405
-//static pair_t codeTable[] = {
-//	{ "OK", OK },
-//	{ "Moved Permanently", MOVED },
-//	{ "Bad Request", BAD },
-//	{ "Not Found", NOT_FOUND },
-//	{ "Method Not Allowed", NOT_ALLOWED }
+//static vk_t responseTable[] = {
+//	{ "OK", RESPONSE_OK },
+//	{ "Moved Permanently", RESPONSE_MOVED },
+//	{ "Bad Request", RESPONSE_BAD },
+//	{ "Not Found", RESPONSE_NOT_FOUND },
+//	{ "Method Not Allowed", RESPONSE_NOT_ALLOWED }
 //};
 
-#define TABELIZE(A) StringEnum(A ## Table, A, sizeof(A ## Table)/sizeof(pair_t))
+// content types
+#define CONTENT_HTML 1
+#define CONTENT_PLAIN 2
+#define CONTENT_PDF 3
+#define CONTENT_PNG 4
+#define CONTENT_JPEG 5
 
-int StringEnum(pair_t * table, const char *key, unsigned n)
+typedef struct {
+	char * C1;
+	char * C2;
+	unsigned C3;
+} triplet_t;
+
+
+static triplet_t contentTable[] = {
+	{ "html", ".html", CONTENT_HTML },
+	{ "text/plain", ".txt", CONTENT_PLAIN },
+	{ "application/pdf", ".pdf", CONTENT_PDF },
+	{ "image/png", ".png", CONTENT_PNG },
+	{ "image/jpeg", ".jpeg", CONTENT_JPEG }
+};
+
+#define TABELIZE(A, B) StringEnum(A ## Table, A, sizeof(A ## Table)/sizeof(triplet_t), B)
+
+int
+StringEnum(const triplet_t * table, const char * key,
+	const unsigned n, const unsigned column)
 {
     for (unsigned i=0; i<n; i++) {
-    	pair_t * pair = table + i*sizeof(pair_t);
-        if (strcmp(pair->k, key) == 0) return pair->v;
+    	char * k = column==1 ? table[i].C1 : table[i].C2;
+        if ( strcmp(k, key) == 0)
+        	return table.C3;
     }
     return NO_MATCH;
 }
@@ -108,42 +135,67 @@ StringBuild(const char * s1, const char * s2) {
 	return ret;
 }
 
-static int
-FileRetrieve(FILE * object, const char * root, const char * path) {
-	(void)object;
-	int rv = NO_MATCH;
-	char * check = StringBuild(root, path);
-	if( access( check, F_OK | R_OK ) != NO_MATCH ) {
-	    // file exists
-		printf("file %s exists\n", check);
-		rv = MATCH;
-	} else {
-	    // file doesn't exist
-		printf("file %s does not exist\n", check);
+void
+ConstructResponse(const unsigned responseCode, const unsigned methodCode,
+		const char * root, const char * requestLine) {
+
+	switch (responseCode) {
+	case RESPONSE_OK:
+
+	case RESPONSE_MOVED:
+	case RESPONSE_BAD:
+	case RESPONSE_NOT_FOUND:
+	case RESPONSE_NOT_ALLOWED:
 	}
-	free(check);
-	return rv;
 }
 
+FILE *
+FileRetrieve(const char * path) {
+	FILE * object = fopen(path, "rb");
+	assert(object);
+	return object;
+}
+
+void
+FileRead(FILE * obj, char * path) {
+	char * content = strrchr(path, '.');
+	switch (TABELIZE(content))
+	case :
+//	if (!ext) {
+//	    /* no extension */
+//	} else {
+//	    printf("extension is %s\n", ext + 1);
+//	}
+}
+
+#define FILE_EXISTS(path) !(access( (path) , F_OK | R_OK ))
+
 static int
-ProcessRequestLine(const char * root, const char * line) {
+ProcessRequestLine(const char * root, const char * requestLine) {
 	unsigned tokenCount = 0;
-	char ** split = StringSplit(line, " ", &tokenCount);
+	char * path = NULL;
+	FILE * object = NULL;
+	char ** split = StringSplit(requestLine, " ", &tokenCount);
 	if (tokenCount != 3) {
 		goto clean;
 	} else if (!strcmp(split[1], VERSION)) {
 		goto clean;
 	}
-
+	path = StringBuild(root, split[1]);
 	char * method = split[0];
-	int rv = -1;
-	FILE * object = NULL;
+	int rv = RESPONSE_BAD;
 	switch (TABELIZE(method)) {
 	case METHOD_GET:
-		rv = FileRetrieve(object, root, split[1]);
-		break;
 	case METHOD_HEAD:
-		rv = FileRetrieve(object, root, split[1]);
+		if( FILE_EXISTS(path) ) {
+			rv = RESPONSE_OK;
+			FILE * object = FileRetrieve(path);
+
+			printf("object found\n");
+		} else {
+			rv = RESPONSE_NOT_FOUND;
+			printf("object not found\n");
+		}
 		break;
 	case METHOD_POST:
 	case METHOD_PUT:
@@ -160,9 +212,13 @@ ProcessRequestLine(const char * root, const char * line) {
 		goto clean;
 	}
 	(void)rv;
+
 	clean:
 		if (tokenCount) free(split[0]);
+		if (path) free(path);
+		if (object) fclose(object);
 		free(split);
+
 	return rv;
 }
 
