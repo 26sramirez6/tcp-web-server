@@ -13,6 +13,8 @@
 #include <assert.h>
 #include <stdint.h>
 
+
+#define SERVER_DEBUG
 #define NO_MATCH -1
 #define MATCH 1
 
@@ -22,6 +24,8 @@
 
 typedef struct { char *k; int v; } kv_t;
 typedef struct { int v; char *k;  } vk_t;
+typedef struct { char * C1;	char * C2; unsigned C3; } triplet_t;
+
 // methods
 #define METHOD_GET 1
 #define METHOD_HEAD 2
@@ -31,15 +35,15 @@ typedef struct { int v; char *k;  } vk_t;
 #define METHOD_TRACE 6
 #define METHOD_CONNECT 7
 #define METHOD_OPTIONS 8
-static kv_t methodTable[] = {
-    { "GET", METHOD_GET },
-	{ "HEAD", METHOD_HEAD },
-	{ "POST", METHOD_POST },
-	{ "PUT", METHOD_PUT },
-	{ "DELETE", METHOD_DELETE },
-	{ "TRACE", METHOD_TRACE },
-	{ "CONNECT", METHOD_CONNECT },
-	{ "OPTIONS", METHOD_OPTIONS }
+static triplet_t methodTable[] = {
+    { "GET", "", METHOD_GET },
+	{ "HEAD", "", METHOD_HEAD },
+	{ "POST", "", METHOD_POST },
+	{ "PUT", "", METHOD_PUT },
+	{ "DELETE", "", METHOD_DELETE },
+	{ "TRACE", "", METHOD_TRACE },
+	{ "CONNECT", "", METHOD_CONNECT },
+	{ "OPTIONS", "", METHOD_OPTIONS }
 };
 
 // response codes
@@ -57,18 +61,13 @@ static kv_t methodTable[] = {
 //};
 
 // content types
-#define CONTENT_HTML 1
-#define CONTENT_PLAIN 2
-#define CONTENT_PDF 3
-#define CONTENT_PNG 4
-#define CONTENT_JPEG 5
+#define CONTENT_HTML 0
+#define CONTENT_PLAIN 1
+#define CONTENT_PDF 2
+#define CONTENT_PNG 3
+#define CONTENT_JPEG 4
 
-typedef struct {
-	char * C1;
-	char * C2;
-	unsigned C3;
-} triplet_t;
-
+#define CHUNKSIZE 1024
 
 static triplet_t contentTable[] = {
 	{ "html", ".html", CONTENT_HTML },
@@ -78,7 +77,7 @@ static triplet_t contentTable[] = {
 	{ "image/jpeg", ".jpeg", CONTENT_JPEG }
 };
 
-#define TABELIZE(A, B) StringEnum(A ## Table, A, sizeof(A ## Table)/sizeof(triplet_t), B)
+#define HASH_LOOKUP(A, B) StringEnum(A ## Table, A, sizeof(A ## Table)/sizeof(triplet_t), (B))
 
 int
 StringEnum(const triplet_t * table, const char * key,
@@ -86,7 +85,7 @@ StringEnum(const triplet_t * table, const char * key,
 {
     for (unsigned i=0; i<n; i++) {
     	char * k = column==1 ? table[i].C1 : table[i].C2;
-        if ( strcmp(k, key) == 0)
+        if ( strcmp(k, key) == 0 )
         	return table.C3;
     }
     return NO_MATCH;
@@ -156,24 +155,76 @@ FileRetrieve(const char * path) {
 	return object;
 }
 
-void
-FileRead(FILE * obj, char * path) {
-	char * content = strrchr(path, '.');
-	switch (TABELIZE(content))
-	case :
-//	if (!ext) {
-//	    /* no extension */
-//	} else {
-//	    printf("extension is %s\n", ext + 1);
-//	}
+unsigned char *
+ChunkRead(FILE * obj) {
+	assert(obj);
+	size_t bytesRead = -1;
+	size_t totalBytesRead = 0;
+	unsigned char * ret = NULL;
+	int i;
+	for (i=1; bytesRead>0; ++i) {
+		ret = (unsigned char *)realloc(ret, CHUNKSIZE*i);
+		bytesRead = fread(ret, 1, CHUNKSIZE, obj);
+		totalBytesRead += bytesRead;
+	}
+	if (totalBytesRead<CHUNKSIZE*i) ret[totalBytesRead] = 0;
+	return ret;
+}
+
+typedef struct {
+	char[BUFLEN] contentType;
+}HTTP_response_t;
+
+void SetContentType(const char * path, HTTP_response_t * response) {
+	char * content = strrchr(path, '.') + 1;
+	int contentCode = HASH_LOOKUP(content, 2);
+	switch (  )
+	case CONTENT_HTML:
+		response->contentType = contentTable[contentCode].C1;
+	case CONTENT_PLAIN:
+
+		break;
+	case CONTENT_PDF:
+	case CONTENT_PNG:
+	case CONTENT_JPEG:
+
+		break;
 }
 
 #define FILE_EXISTS(path) !(access( (path) , F_OK | R_OK ))
+
+void
+ProcessValidMethod(const char * path, const int methodCode, int * rv) {
+	FILE * object = NULL;
+	unsigned char * body = NULL;
+	if( FILE_EXISTS(path) ) {
+		rv = RESPONSE_OK;
+		object = FileRetrieve(path);
+		if ( methodCode == METHOD_GET ) {
+			body = ChunkRead(object);
+		} else { // method is HEAD
+			// malloc anyways to free later
+			body = (unsigned char *) malloc(1);
+			body[0] = 0;
+		}
+	} else {
+		rv = RESPONSE_NOT_FOUND;
+	}
+
+#ifdef SERVER_DEBUG
+	if (rv==RESPONSE_OK) {
+		printf("object %s found\n", path);
+	} else {
+		printf("object %s not found\n", path);
+	}
+#endif
+}
 
 static int
 ProcessRequestLine(const char * root, const char * requestLine) {
 	unsigned tokenCount = 0;
 	char * path = NULL;
+	char * body = NULL;
 	FILE * object = NULL;
 	char ** split = StringSplit(requestLine, " ", &tokenCount);
 	if (tokenCount != 3) {
@@ -184,18 +235,11 @@ ProcessRequestLine(const char * root, const char * requestLine) {
 	path = StringBuild(root, split[1]);
 	char * method = split[0];
 	int rv = RESPONSE_BAD;
-	switch (TABELIZE(method)) {
+	int methodCode = HASH_LOOKUP(method, 1);
+	switch ( methodCode ) {
 	case METHOD_GET:
 	case METHOD_HEAD:
-		if( FILE_EXISTS(path) ) {
-			rv = RESPONSE_OK;
-			FILE * object = FileRetrieve(path);
-
-			printf("object found\n");
-		} else {
-			rv = RESPONSE_NOT_FOUND;
-			printf("object not found\n");
-		}
+		ProcessValidMethod(path, methodCode, &rv);
 		break;
 	case METHOD_POST:
 	case METHOD_PUT:
