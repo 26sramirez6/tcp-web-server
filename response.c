@@ -10,7 +10,10 @@
 #include <string.h>
 #include <ftw.h>
 #include <unistd.h>
+
+//#define NDEBUG
 #include <assert.h>
+
 #include <stdint.h>
 #include <time.h>
 
@@ -86,10 +89,10 @@ static triplet_t contentTable[] = {
 #define INT_HASH(A, B) IntHash(A ## Table, A, sizeof(A ## Table)/sizeof(triplet_t), (B))
 #define STR_HASH(A, B) StrHash(A ## Table, A, sizeof(A ## Table)/sizeof(triplet_t), (B))
 
+
 static int
 IntHash(const triplet_t * table, const char * key,
-	const unsigned n, const unsigned column)
-{
+	const unsigned n, const unsigned column) {
     for (unsigned i=0; i<n; i++) {
     	char * k = column==1 ? table[i].C1 : table[i].C2;
         if ( strcmp(k, key) == 0 )
@@ -100,8 +103,7 @@ IntHash(const triplet_t * table, const char * key,
 
 static char *
 StrHash(const triplet_t * table, const int key,
-	const unsigned n, const unsigned column)
-{
+	const unsigned n, const unsigned column) {
     for (unsigned i=0; i<n; i++) {
     	if (table[i].C3==key)
     		return column==1 ? table[i].C1 : table[i].C2;
@@ -110,8 +112,7 @@ StrHash(const triplet_t * table, const int key,
 }
 
 static unsigned
-GetTokenCount(const char * str, const char * delimiter)
-{
+GetTokenCount(const char * str, const char * delimiter) {
 	char * strCopy = strdup(str);
 	unsigned tokenCount = 0;
 	char * token = strtok(strCopy, delimiter);
@@ -125,8 +126,7 @@ GetTokenCount(const char * str, const char * delimiter)
 }
 
 static char **
-StringSplit(const char * str, const char * delimiter, unsigned * n)
-{
+StringSplit(const char * str, const char * delimiter, unsigned * n) {
 	unsigned tokenCount = GetTokenCount(str, delimiter);
 	char ** ret = (char **)malloc(sizeof(char *)*tokenCount);
 	char * strCopy = strdup(str);
@@ -140,17 +140,45 @@ StringSplit(const char * str, const char * delimiter, unsigned * n)
 	return ret;
 }
 
-static unsigned
-StringBuilder(unsigned char * to, const unsigned char * from) {
-	size_t s1L = strlen((const char *)to);
-	size_t s2L = strlen((const char *)from);
-	to = (unsigned char *)realloc(to, s1L+s2L+1);
-	assert(to);
-	to[s1L+s2L] = 0;
-	for (unsigned i=0;i<s2L;++i)
-		to[s1L+i] = from[i];
-	return s1L+s2L;
+static response_buf_t *
+ResponseBufCreate() {
+	response_buf_t * ret = malloc(sizeof(response_buf_t));
+	ret->capacity = MIDBUF;
+	ret->size  = 0;
+	ret->buf = (char *)malloc(MIDBUF);
+	return ret;
 }
+
+static void
+ResponseBufBuilder(response_buf_t * to, const char * from, size_t n) {
+	assert(to->size<=to->capacity);
+	size_t len = 0;
+	if (!n) {
+		len = n;
+	} else {
+		len = strlen((const char *)from);
+	}
+	// adjust size of the buffer according
+	// to however much needs to be added
+	while (to->capacity < len + to->size) {
+		char * copy = (char *)malloc(to->buf, to->capacity*2);
+		assert(copy);
+		memcpy(copy, to->buf, to->capacity);
+		free(to->buf);
+		to->buf = copy;
+		to->capacity = to->capacity*2;
+	}
+
+	// NE more explicit. the LHS is either equal or
+	// less than capacity based on the loop above.
+	if (to->size+len!=to->capacity) to->buf[to->size+len] = 0;
+	for (unsigned i=0;i<len;++i) to->buf[to->size+i] = from[i];
+	to->size += len;
+}
+
+static void
+FreeResponseBuf(response_buf_t * rb) { free(rb->buf); free(rb); }
+
 
 void
 FileRetrieve(HTTP_response_t * response) {
@@ -170,7 +198,7 @@ ChunkRead(HTTP_response_t * response) {
 	size_t totalBytesRead = 0;
 	int i;
 	for (i=1; bytesRead>0; ++i) {
-		response->body = (unsigned char *)realloc(response->body, CHUNKSIZE*i);
+		response->body = (char *)realloc(response->body, CHUNKSIZE*i);
 		bytesRead = fread(response->body, 1, CHUNKSIZE, response->objFile);
 		totalBytesRead += bytesRead;
 	}
@@ -190,7 +218,7 @@ FillContentType(HTTP_response_t * response) {
 
 void
 ProcessValidMethod(HTTP_response_t * response) {
-	unsigned char * body = NULL;
+	char * body = NULL;
 	if( FILE_EXISTS(response->objPath) ) {
 		response->respCode = RESPONSE_OK;
 		FileRetrieve(response);
@@ -218,68 +246,112 @@ void
 FillResponseBuf(HTTP_response_t * resp) {
 	assert(resp->buf==NULL);
 	// status line
-	StringBuilder(resp->buf, HTTP_VERSION);
-	StringBuilder(resp->buf, " ");
+	ResponseBufBuilder(resp->buf, HTTP_VERSION);
+	ResponseBufBuilder(resp->buf, " ");
 	int response = resp->respCode;
-	StringBuilder(resp->buf, STR_HASH(response, 1));
-	StringBuilder(resp->buf, CRLF);
+	ResponseBufBuilder(resp->buf, STR_HASH(response, 1));
+	ResponseBufBuilder(resp->buf, CRLF);
 
 	if (response != RESPONSE_OK) {
 		resp->size = strlen(resp->buf);
 	}
 
 	// connection type line
-	StringBuilder(resp->buf, CONNECTION_LINE);
-	StringBuilder(resp->buf, CRLF);
+	ResponseBufBuilder(resp->buf, CONNECTION_LINE, 0);
+	ResponseBufBuilder(resp->buf, CRLF, 0);
 	// date line
-	StringBuilder(resp->buf, DATE_LINE);
-	StringBuilder(resp->buf, resp->dateLine);
-	StringBuilder(resp->buf, CRLF);
+	ResponseBufBuilder(resp->buf, DATE_LINE, 0);
+	ResponseBufBuilder(resp->buf, resp->dateLine, 0);
+	ResponseBufBuilder(resp->buf, CRLF, 0);
 	// server line
-	StringBuilder(resp->buf, SERVER_LINE);
-	StringBuilder(resp->buf, resp->serverLine);
-	StringBuilder(resp->buf, CRLF);
+	ResponseBufBuilder(resp->buf, SERVER_LINE, 0);
+	ResponseBufBuilder(resp->buf, resp->serverLine, 0);
+	ResponseBufBuilder(resp->buf, CRLF, 0);
 	// last modified line
-	StringBuilder(resp->buf, LAST_MODIFIED_LINE);
-	StringBuilder(resp->buf, resp->lastModifiedLine);
-	StringBuilder(resp->buf, CRLF);
+	ResponseBufBuilder(resp->buf, LAST_MODIFIED_LINE, 0);
+	ResponseBufBuilder(resp->buf, resp->lastModifiedLine, 0);
+	ResponseBufBuilder(resp->buf, CRLF, 0);
 	// content length line
-	StringBuilder(resp->buf, CONTENT_LENGTH_LINE);
+	ResponseBufBuilder(resp->buf, CONTENT_LENGTH_LINE, 0);
 	const int n = snprintf(NULL, 0, "%zu", resp->contentLength);
 	assert(n > 0);
 	char contentLength[n+1];
 	const int c = snprintf(contentLength, n+1, "%zu", resp->contentLength);
 	assert(contentLength[n] == 0);
 	assert(c == n);
-	StringBuilder(resp->buf, contentLength);
-	StringBuilder(resp->buf, CRLF);
+	ResponseBufBuilder(resp->buf, contentLength, 0);
+	ResponseBufBuilder(resp->buf, CRLF, 0);
 	// content type line
-	StringBuilder(resp->buf, CONTENT_TYPE_LINE);
-	StringBuilder(resp->buf, resp->contentTypeLine);
-	StringBuilder(resp->buf, CRLF);
-	// final crlf
-	resp->size = StringBuilder(resp->buf, CRLF);
+	ResponseBufBuilder(resp->buf, CONTENT_TYPE_LINE, 0);
+	ResponseBufBuilder(resp->buf, resp->contentTypeLine, 0);
+	ResponseBufBuilder(resp->buf, CRLF, 0);
+	// final crlf before data
+	ResponseBufBuilder(resp->buf, CRLF, 0);
 	// copy the data over finally
-	resp->buf = realloc(resp->buf, resp->size+resp->contentLength+1);
-	resp->buf[resp->size+resp->contentLength] = 0;
-	memcpy(resp->buf[resp->contentLength], resp->body, resp->contentLength);
-	resp->size += resp->contentLength;
+	ResponseBufBuilder(resp->buf, resp->body, resp->contentLength);
 }
 
-static
-ProcessRequestLine(const char * requestLine, HTTP_response_t * response) {
-	unsigned tokenCount = 0;
+static void
+ProcessRequest(const char * requestLine, HTTP_response_t * response) {
+}
+
+
+void
+InitializeResponse(HTTP_response_t * response) {
+	char connLine[] = CONNECTION_LINE;
+	memcpy(response->connectionLine, connLine, sizeof(connLine));
+	memset(response->contentLengthLine, 0, SMALLBUF);
+	memset(response->contentTypeLine, 0, SMALLBUF);
+	memset(response->lastModifiedLine, 0, SMALLBUF);
+	memset(response->serverLine, 0, SMALLBUF);
+	memset(response->statusLine, 0, SMALLBUF);
+	memset(response->dateLine, 0, SMALLBUF);
+	response->body = NULL;
+	response->contentCode = NO_MATCH;
+	response->contentLength = 0;
+	response->methodCode = NO_MATCH;
+	response->respCode = NO_MATCH;
+	response->objFile = NULL;
+	response->buf = ResponseBufCreate();
+
+	time_t now = time(0);
+	struct tm* timeInfo = gmtime(&now);
+	size_t rv1 = 0;
+	rv1 = strftime((char *)response->dateLine, SMALLBUF,
+			"%a, %d %b %Y %H:%M:%S %Z", timeInfo);
+	assert(rv1);
+	int rv2 = 0;
+	rv2 = gethostname((char *)response->serverLine, SMALLBUF);
+	assert(rv2!=-1);
+
+	response->objPath = getcwd(NULL, 0);
+	assert(response->objPath);
+	response->objPath = strcat(response->objPath, "/www");
+}
+
+void
+InitializeRequest(const ServerTCPMessage * msg,
+		HTTP_request_t * request) {
+	request->buf = msg->buf;
+	request->size = msg->bytesOut;
+}
+
+void
+FillResponse(HTTP_request_t * request, HTTP_response_t * response) {
 	char * body = NULL;
-	char ** split = StringSplit(requestLine, " ", &tokenCount);
-	if (tokenCount != 3) {
+	unsigned reqTokens = 0;
+	unsigned reqHeadTokens = 0;
+	char ** reqSplit = StringSplit((char *)request->buf, "\r\n", &reqTokens);
+	char ** reqHeadSplit = StringSplit(reqSplit[0], " ", &reqHeadTokens);
+	if (reqHeadTokens != 3) {
 		response->respCode = RESPONSE_BAD;
 		goto clean;
-	} else if (!strcmp(split[1], HTTP_VERSION)) {
+	} else if (!strcmp(reqHeadSplit[1], HTTP_VERSION)) {
 		response->respCode = RESPONSE_BAD;
 		goto clean;
 	}
-	response->objPath = StringBuilder(response->objPath, split[1]);
-	char * method = split[0];
+	response->objPath = strcat(response->objPath, reqHeadSplit[1]);
+	char * method = reqHeadSplit[0];
 	response->methodCode = INT_HASH(method, 1);
 	switch ( response->methodCode ) {
 	case METHOD_GET:
@@ -303,70 +375,24 @@ ProcessRequestLine(const char * requestLine, HTTP_response_t * response) {
 	FillResponseBuf(response);
 
 	clean:
-		if (tokenCount) free(split[0]);
-		free(split);
-}
-
-static void
-ProcessRequest(const char * root, const char * request,
-		HTTP_response_t * response) {
-	unsigned tokenCount = 0;
-	char ** split = StringSplit(request, "\r\n", &tokenCount);
-	ProcessRequestLine(root, split[0], response);
-	if (tokenCount) free(split[0]);
-	free(split);
+		if (reqTokens) free(reqSplit[0]);
+		free(reqSplit);
+		if (reqHeadTokens) free(reqHeadSplit[0]);
+		free(reqHeadSplit);
 }
 
 void
-InitializeResponse(HTTP_response_t * response) {
-	int rv = 0;
-	char connLine[] = CONNECTION_LINE;
-	memcpy(response->connectionLine, connLine, sizeof(connLine));
-	memset(response->contentLengthLine, 0, SMALLBUF);
-	memset(response->contentTypeLine, 0, SMALLBUF);
-	memset(response->lastModifiedLine, 0, SMALLBUF);
-	memset(response->serverLine, 0, SMALLBUF);
-	memset(response->statusLine, 0, SMALLBUF);
-	memset(response->dateLine, 0, SMALLBUF);
-	response->body = NULL;
-	response->contentCode = NO_MATCH;
-	response->contentLength = 0;
-	response->methodCode = NO_MATCH;
-	response->respCode = NO_MATCH;
-	response->objFile = NULL;
-	time_t now = time(0);
-	struct tm* timeInfo = gmtime(&now);
-	rv = strftime(response->dateLine, SMALLBUF,
-			"%a, %d %b %Y %H:%M:%S %Z", timeInfo);
-	assert(rv);
-	rv = gethostname(response->serverLine, SMALLBUF);
-	assert(rv==0);
-
-	response->objPath = getcwd(NULL, 0);
-	assert(response->objPath);
-	response->objPath = StringBuilder(response->objPath, "/www");
-}
-
-void
-InitializeRequest(const ServerTCPMessage * msg,
-		HTTP_request_t * request) {
-	request->buf = msg->buf;
-	request->size = msg->bytesOut;
-}
-
-void
-FillResponse(HTTP_request_t * request, HTTP_response_t * response) {
-	unsigned tokenCount = 0;
-	char ** split = StringSplit((char *)request->buf, "\r\n", &tokenCount);
-	ProcessRequestLine(split[0], response);
-	if (tokenCount) free(split[0]);
-	free(split);
+FreeResponse(HTTP_response_t * response) {
+	if (response->buf!=NULL) FreeResponseBuf(response->buf);
+	if (response->objFile!=NULL) fclose(response->objFile);
+	if (response->objPath!=NULL) free(response->objPath);
+	if (response->body!=NULL) free(response->body);
 }
 
 int main() {
 	char * cwd = getcwd(NULL, 0);
 	assert(cwd);
-	char * root = StringBuild(cwd, "/www");
+	char * root = strcat(cwd, "/www");
 	char * req = "OPTIONS /images/uchicago/logo.png HTTP/1.1\r\nHost: www.someschool.edu\r\n";
 	HTTP_response_t response;
 	InitializeResponse(&response);
@@ -375,4 +401,4 @@ int main() {
 	free(cwd);
 	free(root);
 	printf("exiting\n");
-};
+}

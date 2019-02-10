@@ -13,6 +13,12 @@
 
 #include "util.h"
 
+typedef struct response_buf_t {
+	size_t size;
+	size_t capacity;
+	unsigned char * buf;
+}response_buf_t;
+
 typedef struct {
 	int respCode;
 	int methodCode;
@@ -30,7 +36,7 @@ typedef struct {
 	unsigned char contentTypeLine[SMALLBUF];
 
 	unsigned char * body;
-	unsigned char * buf;
+	response_buf_t * buf;
 	char * objPath;
 	FILE * objFile;
 
