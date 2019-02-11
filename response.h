@@ -10,40 +10,42 @@
 
 #define SMALLBUF 128
 #define MIDBUF 1024
+#define LARGEBUF 8192
 
 #include "util.h"
+
+typedef unsigned char byte;
 
 typedef struct response_buf_t {
 	size_t size;
 	size_t capacity;
-	unsigned char * buf;
+	byte * buf;
 }response_buf_t;
 
 typedef struct {
 	int respCode;
 	int methodCode;
 	int contentCode;
-	unsigned objPathLen;
 	size_t contentLength;
-	size_t size;
 
-	unsigned char statusLine[SMALLBUF];
-	unsigned char connectionLine[SMALLBUF];
-	unsigned char dateLine[SMALLBUF];
-	unsigned char serverLine[SMALLBUF];
-	unsigned char lastModifiedLine[SMALLBUF];
-	unsigned char contentLengthLine[SMALLBUF];
-	unsigned char contentTypeLine[SMALLBUF];
+	char statusLine[SMALLBUF];
+	char connectionLine[SMALLBUF];
+	char dateLine[SMALLBUF];
+	char serverLine[SMALLBUF];
+	char lastModifiedLine[SMALLBUF];
+	char contentLengthLine[SMALLBUF];
+	char contentTypeLine[SMALLBUF];
 
-	unsigned char * body;
+	byte * body;
 	response_buf_t * buf;
 	char * objPath;
+	char * redirectPath;
 	FILE * objFile;
 
 } HTTP_response_t;
 
 typedef struct {
-	unsigned char * buf;
+	byte * buf;
 	ssize_t size;
 } HTTP_request_t;
 

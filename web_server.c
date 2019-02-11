@@ -19,9 +19,9 @@ static void ServerCallback(const ServerTCPMessage * serverMsg) {
 
 #ifdef SERVER_DEBUG
 	printf("ServerCallback::Server sending %zd bytes to %s:\n%s\n",
-			response->size, serverMsg->clientName, response->buf);
+			response->buf->size, serverMsg->clientName, response->buf);
 #endif
-	send(serverMsg->tcpFd, response->buf, response->size, 0);
+	send(serverMsg->tcpFd, response->buf->buf, response->buf->size, 0);
 	FreeResponse(&response);
 }
 

@@ -10,12 +10,12 @@ endif
 
 .PHONY: clean
 
-all: clean strutil
+all: clean response
 
 debug: all
 	
-valgrind: clean strutil
-	valgrind --leak-check=full --log-file="valgrind.out" --show-reachable=yes -v ./strutil
+valgrind: clean response
+	valgrind --leak-check=full --log-file="valgrind.out" --show-reachable=yes -v ./response
 	
 web_server: web_server.o util.o
 	$(CC) $(CFLAGS) -o $@ $^
@@ -26,8 +26,9 @@ web_server.o: web_server.c util.h
 util.o: util.c util.h
 	$(CC) $(CFLAGS) -c -o $@ $<
 	
-strutil: strutil.c
+response: response.c
 	$(CC) $(CFLAGS) -o $@ $<
 	
 clean:
 	rm -rf *.o *.exe
+	find . -maxdepth 1 -type f -executable -delete
