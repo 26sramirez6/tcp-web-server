@@ -44,8 +44,6 @@ static long int CheckValidPort(char * str) {
 // 4. run a specific call back defined in the server program
 void ServerSpinTCP(int tcpFd, OnReceiveDelegate callback) {
 	int acceptFd = CLOSED_SOCKET;
-	sockaddr clientAddr;
-	socklen_t addrSize;
 	ssize_t bytesRead = 0;
 	unsigned char buf[BUFLEN] = {0};
 	char clientName[NI_MAXHOST];
@@ -64,6 +62,8 @@ void ServerSpinTCP(int tcpFd, OnReceiveDelegate callback) {
 	}
 
 	while (!SIG_FLAG) {
+		sockaddr clientAddr;
+		socklen_t addrSize = sizeof(clientAddr);
 		// now accept an incoming connection
 		if ((acceptFd = accept(tcpFd, &clientAddr, &addrSize)) == -1) {
 			fprintf(stderr, "accept() error occured\n");
