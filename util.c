@@ -33,7 +33,16 @@ static long int CheckValidPort(char * str) {
 	return val;
 }
 
+typedef struct thread_context_t{
+	OnReceiveDelegate callback;
+	ServerTCPMessage * msg;
+}thread_context_t;
 
+static void *
+ThreadedCallback(void * arg) {
+	thread_context_t * tc = (thread_context_t *) arg;
+	tc->callback(tc->msg);
+}
 // takes the listening TCP socket returned from ServerInitTCP()
 // and a callback function to perform a specific task
 // on any successful data receive event.
@@ -89,12 +98,16 @@ void ServerSpinTCP(int tcpFd, OnReceiveDelegate callback) {
 			if (callback != NULL) {
 				pthread_t worker;
 				ServerTCPMessage serverMsg;
+				thread_context_t context;
+
 				serverMsg.buf = buf;
 				serverMsg.bytesOut = bytesRead;
 				serverMsg.clientName = clientName;
 				serverMsg.clientService = clientService;
 				serverMsg.tcpFd = acceptFd;
-				pthread_create(&worker, NULL, callback, &serverMsg);
+				context.msg = serverMsg;
+				context.callback = callback;
+				pthread_create(&worker, NULL, ThreadedCallback, &context);
 //				callback(&serverMsg);
 			}
 		} else if (rv!=0) {
