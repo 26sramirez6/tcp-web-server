@@ -5,6 +5,7 @@
  *      Author: 26sra
  */
 
+#include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -19,32 +20,22 @@
 
 #include "response.h"
 
-#define SERVER_DEBUG
+// redirect globals
+typedef struct { char * requestedItem; char * redirect; } redirect_t;
+static vararray_handle redirectTable = NULL;
+static int redirectSet = 0;
 
-#define NO_MATCH -1
-#define MATCH 1
-#define REDIRECT_PATH "/redirect.defs"
-#define ROOT "/www"
-#define CONNECTION_LINE "Connection: close"
-#define LAST_MODIFIED_LINE "Last Modified: "
-#define DATE_LINE "Date: "
-#define SERVER_LINE "Server: "
-#define CONTENT_LENGTH_LINE "Content Length: "
-#define CONTENT_TYPE_LINE "Content-Type: "
-#define HTTP_VERSION "HTTP/1.1"
-#define CRLF "\r\n"
 // table record
 typedef struct { const char * C1;	const char * C2; const int C3; } triplet_t;
 
-// method codes
-#define METHOD_GET 1
-#define METHOD_HEAD 2
-#define METHOD_POST 3
-#define METHOD_PUT 4
-#define METHOD_DELETE 5
-#define METHOD_TRACE 6
-#define METHOD_CONNECT 7
-#define METHOD_OPTIONS 8
+static triplet_t contentTable[] = {
+	{ "text/html", "html", CONTENT_HTML },
+	{ "text/plain", "txt", CONTENT_PLAIN },
+	{ "application/pdf", "pdf", CONTENT_PDF },
+	{ "image/png", "png", CONTENT_PNG },
+	{ "image/jpeg", "jpeg", CONTENT_JPEG }
+};
+
 static triplet_t methodTable[] = {
     { "GET", "", METHOD_GET },
 	{ "HEAD", "", METHOD_HEAD },
@@ -56,12 +47,6 @@ static triplet_t methodTable[] = {
 	{ "OPTIONS", "", METHOD_OPTIONS }
 };
 
-// response codes
-#define RESPONSE_OK 200
-#define RESPONSE_MOVED 301
-#define RESPONSE_BAD 400
-#define RESPONSE_NOT_FOUND 404
-#define RESPONSE_NOT_ALLOWED 405
 static triplet_t responseTable[] = {
 	{ "200 OK", "", RESPONSE_OK },
 	{ "301 Moved Permanently", "", RESPONSE_MOVED },
@@ -70,26 +55,9 @@ static triplet_t responseTable[] = {
 	{ "405 Method Not Allowed", "", RESPONSE_NOT_ALLOWED }
 };
 
-// content types
-#define CONTENT_HTML 0
-#define CONTENT_PLAIN 1
-#define CONTENT_PDF 2
-#define CONTENT_PNG 3
-#define CONTENT_JPEG 4
-
-#define CHUNKSIZE 1024
-
-static triplet_t contentTable[] = {
-	{ "text/html", "html", CONTENT_HTML },
-	{ "text/plain", "txt", CONTENT_PLAIN },
-	{ "application/pdf", "pdf", CONTENT_PDF },
-	{ "image/png", "png", CONTENT_PNG },
-	{ "image/jpeg", "jpeg", CONTENT_JPEG }
-};
 
 #define INT_HASH(A, B) IntHash(A ## Table, A, sizeof(A ## Table)/sizeof(triplet_t), (B))
 #define STR_HASH(A, B) StrHash(A ## Table, A, sizeof(A ## Table)/sizeof(triplet_t), (B))
-
 
 static int
 IntHash(const triplet_t * table, const char * key,
@@ -197,25 +165,28 @@ FileRetrieve(HTTP_response_t * response) {
 	assert(response->objFile);
 }
 
-
+byte *
+Read(const char * path, size_t * read) {
+	FILE * file = NULL;
+	file = fopen(path, "rb");
+	assert(file);
+	fseek(file, 0, SEEK_END);
+	size_t size = ftell(file);
+	fseek(file, 0, SEEK_SET);
+	byte * buf = malloc(size*sizeof(byte));
+	size_t bytesRead = fread(buf, sizeof(byte), size, file);
+	printf("bytes read: %zd, ftell: %zd\n", bytesRead, size);
+	*read = bytesRead;
+	fclose(file);
+	assert(bytesRead==size);
+	assert(buf);
+	return buf;
+}
 
 static void
-ChunkRead(HTTP_response_t * response) {
-	assert(response->objFile);
+GetObject(HTTP_response_t * response) {
 	assert(response->body==NULL);
-
-	size_t bytesRead = -1;
-	size_t totalBytesRead = 0;
-	unsigned i;
-	for (i=1; bytesRead>0; ++i) {
-		response->body = (byte *)realloc(response->body, CHUNKSIZE*i);
-		bytesRead = fread(response->body+(CHUNKSIZE*(i-1)),
-				sizeof(byte), CHUNKSIZE, response->objFile);
-		totalBytesRead += bytesRead;
-	}
-	if (totalBytesRead<CHUNKSIZE*i)
-		response->body[totalBytesRead] = 0;
-	response->contentLength = totalBytesRead;
+	response->body = Read((const char *)response->objPath, &response->contentLength);
 }
 
 static void
@@ -233,12 +204,30 @@ FillContentType(HTTP_response_t * response) {
 
 #define FILE_EXISTS(path) !(access( (path) , F_OK | R_OK ))
 
+
+static int
+SearchRedirects(HTTP_response_t * response) {
+	assert(redirectSet);
+	for (unsigned i=0;i<vararray_size(redirectTable);++i) {
+		redirect_t * redirect = vararray_get(redirectTable, i);
+		if (!strcmp(redirect->requestedItem, response->objRequested)) {
+			response->objRequested = redirect->redirect;
+			return MATCH;
+		}
+	}
+	return NO_MATCH;
+}
+
 static void
 ProcessValidMethod(HTTP_response_t * response) {
-	if( FILE_EXISTS(response->objPath) ) {
+
+//	char * urlRedirect = NULL;
+	if ( SearchRedirects(response)==MATCH ) {//, urlRedirect) ) {
+		response->respCode = RESPONSE_MOVED;
+	} else if( FILE_EXISTS(response->objPath) ) {
 		response->respCode = RESPONSE_OK;
 		FileRetrieve(response);
-		ChunkRead(response);
+		GetObject(response);
 		FillContentType(response);
 	} else {
 		response->respCode = RESPONSE_NOT_FOUND;
@@ -275,7 +264,13 @@ FillResponseBuf(HTTP_response_t * resp) {
 	ResponseBufBuilder(resp->buf, resp->serverLine, 0);
 	ResponseBufBuilder(resp->buf, CRLF, 0);
 
-	if (response != RESPONSE_OK) return;
+	if (response==RESPONSE_MOVED) {
+		ResponseBufBuilder(resp->buf, LOCATION_LINE, 0);
+		ResponseBufBuilder(resp->buf, resp->objRequested, 0);
+		ResponseBufBuilder(resp->buf, CRLF, 0);
+	}
+
+	if (response!=RESPONSE_OK) return;
 
 	// last modified line
 	ResponseBufBuilder(resp->buf, LAST_MODIFIED_LINE, 0);
@@ -340,6 +335,7 @@ FillResponse(HTTP_request_t * request, HTTP_response_t * response) {
 		goto fill;
 	}
 	response->objPath = StrCat(response->objPath, reqHeadSplit[1]);
+	response->objRequested = reqHeadSplit[1];
 	if (!strcmp(response->objPath, response->redirectPath)) {
 		response->respCode = RESPONSE_NOT_FOUND;
 		goto fill;
@@ -374,6 +370,33 @@ fill:
 	free(reqHeadSplit);
 }
 
+static void
+SetRedirects(const char * path) {
+	char * line = NULL;
+	size_t len = 0;
+	ssize_t nread;
+	unsigned tokens = 0;
+	FILE * file = NULL;
+	file = fopen(path, "rb");
+	assert(file);
+
+	redirectTable = vararray_create();
+
+	while ((nread = getline(&line, &len, file)) != -1) {
+		char ** split = StringSplit(line, " \n", &tokens);
+		redirect_t * redirect = (redirect_t *)malloc(sizeof(redirect_t));
+		redirect->requestedItem = (char *)split[0];
+		redirect->redirect = (char *)split[1];
+		vararray_push_back(redirectTable, redirect);
+		assert(tokens);
+		free(split);
+		free(line);
+		line = NULL;
+		printf("redirect added: %s --> %s\n", redirect->requestedItem, redirect->redirect);
+	}
+	fclose(file);
+}
+
 void
 InitializeResponse(HTTP_response_t * response) {
 	char connLine[] = CONNECTION_LINE;
@@ -390,6 +413,7 @@ InitializeResponse(HTTP_response_t * response) {
 	response->methodCode = NO_MATCH;
 	response->respCode = NO_MATCH;
 	response->objFile = NULL;
+	response->objRequested = NULL;
 	response->buf = ResponseBufCreate();
 
 	time_t now = time(0);
@@ -407,10 +431,24 @@ InitializeResponse(HTTP_response_t * response) {
 	response->objPath = StrCat(response->objPath, ROOT);
 	response->redirectPath = strdup(response->objPath);
 	response->redirectPath = StrCat(response->redirectPath, REDIRECT_PATH);
+	if (!redirectSet) {
+		SetRedirects(response->redirectPath);
+		redirectSet = 1;
+	}
+}
 
-//	FILE * redirect = fopen(response->redirectPath, "r");
-
-
+void
+FreeRedirects() {
+	if (redirectSet) {
+		for (unsigned i=0;i<vararray_size(redirectTable);++i) {
+			redirect_t * redirect = (redirect_t *)vararray_get(redirectTable, i);
+			if (redirect->redirect) free(redirect->redirect);
+			if (redirect->requestedItem) free(redirect->requestedItem);
+			free(redirect);
+		}
+		vararray_destroy(redirectTable);
+	}
+	redirectSet = 0;
 }
 
 void
@@ -420,152 +458,4 @@ FreeResponse(HTTP_response_t * response) {
 	if (response->objPath!=NULL) free(response->objPath);
 	if (response->body!=NULL) free(response->body);
 	if (response->redirectPath!=NULL) free(response->redirectPath);
-}
-
-static void
-test1() {
-	char * req = "OPTIONS /images/uchicago/logo.png HTTP/1.1\r\nHost: www.someschool.edu\r\n";
-	HTTP_response_t response;
-	HTTP_request_t request;
-	request.buf = (byte *) req;
-	InitializeResponse(&response);
-	FillResponse(&request, &response);
-	assert(response.respCode==RESPONSE_NOT_ALLOWED);
-	printf("%s\n", response.buf->buf);
-	FreeResponse(&response);
-}
-
-static void
-test2() {
-	char * req = "GET /images/uchicago/logo.png HTTP/1.1\r\nHost: www.someschool.edu\r\n";
-	HTTP_response_t response;
-	HTTP_request_t request;
-	request.buf = (byte *) req;
-	InitializeResponse(&response);
-	FillResponse(&request, &response);
-	assert(response.respCode==RESPONSE_OK);
-	printf("%s\n", response.buf->buf);
-	FreeResponse(&response);
-}
-
-static void
-test3() {
-	char * req = "GET /file/notfound.png HTTP/1.1\r\nHost: www.someschool.edu\r\n";
-	HTTP_response_t response;
-	HTTP_request_t request;
-	request.buf = (byte *) req;
-	InitializeResponse(&response);
-	FillResponse(&request, &response);
-	assert(response.respCode==RESPONSE_NOT_FOUND);
-	printf("%s\n", response.buf->buf);
-	FreeResponse(&response);
-}
-
-static void
-test4() {
-	char * req = "HEAD /file/notfound.png HTTP/1.1\r\nHost: www.someschool.edu\r\n";
-	HTTP_response_t response;
-	HTTP_request_t request;
-	request.buf = (byte *) req;
-	InitializeResponse(&response);
-	FillResponse(&request, &response);
-	assert(response.respCode==RESPONSE_NOT_FOUND);
-	printf("%s\n", response.buf->buf);
-	FreeResponse(&response);
-}
-
-static void
-test5() {
-	char * req = "HEAD /images/uchicago/logo.png HTTP/1.1\r\nHost: www.someschool.edu\r\n";
-	HTTP_response_t response;
-	HTTP_request_t request;
-	request.buf = (byte *) req;
-	InitializeResponse(&response);
-	FillResponse(&request, &response);
-	assert(response.respCode==RESPONSE_OK);
-	printf("%s\n", response.buf->buf);
-	FreeResponse(&response);
-}
-
-static void
-test6() {
-	char * req = "HEAD _ /file/notfound.png HTTP/1.1\r\nHost: www.someschool.edu\r\n";
-	HTTP_response_t response;
-	HTTP_request_t request;
-	request.buf = (byte *) req;
-	InitializeResponse(&response);
-	FillResponse(&request, &response);
-	assert(response.respCode==RESPONSE_BAD);
-	printf("%s\n", response.buf->buf);
-	FreeResponse(&response);
-}
-
-static void
-test7() {
-	char * req = "HEAD /redirect.defs HTTP/1.1\r\nHost: www.someschool.edu\r\n";
-	HTTP_response_t response;
-	HTTP_request_t request;
-	request.buf = (byte *) req;
-	InitializeResponse(&response);
-	FillResponse(&request, &response);
-	assert(response.respCode==RESPONSE_NOT_FOUND);
-	printf("%s\n", response.buf->buf);
-	FreeResponse(&response);
-}
-
-size_t
-Read(const char * path, byte * buf, size_t initialSize) {
-	FILE * file = NULL;
-	size_t bytesRead = 0;
-	size_t totalBytesRead = 0;
-	size_t currentSize = initialSize;
-	assert(buf);
-	unsigned i = 2;
-	file = fopen(path, "rb");
-	if (file != NULL)
-	{
-		// read up to sizeof(buffer) bytes
-		while ((bytesRead = fread(buf+(CHUNKSIZE*(i-2)), sizeof(byte), CHUNKSIZE, file)) > 0)
-		{
-			totalBytesRead += bytesRead;
-			if (bytesRead==CHUNKSIZE) assert(CHUNKSIZE*(i-1)==totalBytesRead);
-			assert(currentSize<CHUNKSIZE*i);
-			buf = realloc(buf, CHUNKSIZE*i);
-			currentSize += bytesRead;
-			i++;
-		}
-	}
-	fclose(file);
-	return totalBytesRead;
-}
-
-static void
-test0() {
-	byte * ret = malloc(CHUNKSIZE*sizeof(byte));
-	size_t total = Read("/home/sramirez266/eclipse-workspace/tcp-web-server/www/test_redirects.defs", ret, CHUNKSIZE);
-	FILE * obj = fopen("/home/sramirez266/eclipse-workspace/tcp-web-server/www/test_write.txt", "w");
-	fwrite(ret, sizeof(byte), total, obj);
-	printf("total: %zd\n", total);
-	fclose(obj);
-	free(ret);
-}
-
-int main() {
-	printf("==========TEST 0:==========\n");
-	test0();
-	printf("==========TEST 1:==========\n");
-	test1();
-	printf("==========TEST 2:==========\n");
-	test2();
-	printf("==========TEST 3:==========\n");
-	test3();
-	printf("==========TEST 4:==========\n");
-	test4();
-	printf("==========TEST 5:==========\n");
-	test5();
-	printf("==========TEST 6:==========\n");
-	test6();
-	printf("==========TEST 7:==========\n");
-	test7();
-	printf("exiting\n");
 }

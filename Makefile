@@ -10,24 +10,33 @@ endif
 
 .PHONY: clean
 
-all: clean response
+all: clean web_server
 
 debug: all
 	
-valgrind: clean response
-	valgrind --leak-check=full --log-file="valgrind.out" --show-reachable=yes -v ./response
+valgrind: clean tests
+	valgrind --leak-check=full --log-file="valgrind.out" --show-reachable=yes -v ./tests
 	
-web_server: web_server.o util.o
+web_server: response.o web_server.o util.o vararray.o
 	$(CC) $(CFLAGS) -o $@ $^
 	
-web_server.o: web_server.c util.h
+web_server.o: web_server.c util.h response.h vararray.h
+	$(CC) $(CFLAGS) -c -o $@ $<
+	
+tests: tests.o response.o vararray.o util.o
+	$(CC) $(CFLAGS) -o $@ $^
+	
+tests.o: tests.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+response.o: response.c response.h
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+vararray.o: vararray.c vararray.h
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 util.o: util.c util.h
 	$(CC) $(CFLAGS) -c -o $@ $<
-	
-response: response.c
-	$(CC) $(CFLAGS) -o $@ $<
 	
 clean:
 	rm -rf *.o *.exe
