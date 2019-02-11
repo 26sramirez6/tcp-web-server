@@ -18,7 +18,7 @@ valgrind: clean tests
 	valgrind --leak-check=full --log-file="valgrind.out" --show-reachable=yes -v ./tests
 	
 web_server: response.o web_server.o util.o vararray.o
-	$(CC) $(CFLAGS) -o $@ $^
+	$(CC) $(CFLAGS) -o $@ $^ -lpthread
 	
 web_server.o: web_server.c util.h response.h vararray.h
 	$(CC) $(CFLAGS) -c -o $@ $<

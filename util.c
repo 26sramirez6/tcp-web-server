@@ -36,12 +36,15 @@ static long int CheckValidPort(char * str) {
 typedef struct thread_context_t{
 	OnReceiveDelegate callback;
 	ServerTCPMessage * msg;
+	int sd;
 }thread_context_t;
 
 static void *
 ThreadedCallback(void * arg) {
 	thread_context_t * tc = (thread_context_t *) arg;
 	tc->callback(tc->msg);
+	close(tc->sd);
+	return NULL;
 }
 // takes the listening TCP socket returned from ServerInitTCP()
 // and a callback function to perform a specific task
@@ -107,6 +110,7 @@ void ServerSpinTCP(int tcpFd, OnReceiveDelegate callback) {
 				serverMsg.tcpFd = acceptFd;
 				context.msg = serverMsg;
 				context.callback = callback;
+				context.sd = acceptFd;
 				pthread_create(&worker, NULL, ThreadedCallback, &context);
 //				callback(&serverMsg);
 			}
@@ -114,7 +118,6 @@ void ServerSpinTCP(int tcpFd, OnReceiveDelegate callback) {
 			fprintf(stderr, "getnameinfo() error: %s\n", gai_strerror(rv));
 			goto clean;
 		}
-		close(acceptFd);
 		acceptFd = CLOSED_SOCKET;
 	}
 	// clean up on SIGINT
