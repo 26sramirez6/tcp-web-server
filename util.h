@@ -18,6 +18,7 @@
 #include <errno.h>
 #include <limits.h>
 #include <unistd.h>
+#include <pthread.h>
 #include "signal.h"
 
 #define SERVER_DEBUG

@@ -87,13 +87,15 @@ void ServerSpinTCP(int tcpFd, OnReceiveDelegate callback) {
 					bytesRead, clientName, buf);
 #endif
 			if (callback != NULL) {
+				pthread_t worker;
 				ServerTCPMessage serverMsg;
 				serverMsg.buf = buf;
 				serverMsg.bytesOut = bytesRead;
 				serverMsg.clientName = clientName;
 				serverMsg.clientService = clientService;
 				serverMsg.tcpFd = acceptFd;
-				callback(&serverMsg);
+				pthread_create(&worker, NULL, callback, &serverMsg);
+//				callback(&serverMsg);
 			}
 		} else if (rv!=0) {
 			fprintf(stderr, "getnameinfo() error: %s\n", gai_strerror(rv));
